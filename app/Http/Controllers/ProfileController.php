@@ -6,6 +6,7 @@ use App\Http\Requests\ProfileUpdateRequest;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Redirect;
 use Illuminate\View\View;
 
@@ -56,5 +57,62 @@ class ProfileController extends Controller
         $request->session()->regenerateToken();
 
         return Redirect::to('/');
+    }
+
+    public function confirmPassword(){
+        return view('google2fa.confirm-password');
+    }
+
+    public function confirmPasswordStore(Request $request){
+        $request->validate([
+            'password' => 'required',
+        ]);
+        $user = \auth()->user();
+        $checkPassword = Hash::check($request->password, $user->password);
+        if($checkPassword){
+            if(empty($user->google2fa_secret)){
+                $google2fa = app('pragmarx.google2fa');
+                $google2fa_secret = $google2fa->generateSecretKey();
+                $user->update([
+                    'google2fa_secret' => $google2fa_secret,
+                ]);
+            }
+            return redirect()->route('profile.showForm2fa');
+        }
+        return  redirect()->route('profile.confirm_password')->with('error',"Password not match");
+    }
+    public function showForm2fa(){
+        $user = auth()->user();
+        $google2fa = app('pragmarx.google2fa');
+        $key_secret =  $user->google2fa_secret;
+        $google2fa_url = $google2fa->getQRCodeInline(
+            config('app.name'),
+            $user->email,
+            $key_secret
+        );
+        return view('google2fa.form-2fa',compact('google2fa_url','key_secret'));
+    }
+
+    public function showForm2faStore(Request $request){
+        $request->validate([
+            'secret' => 'required'
+        ]);
+        $user = auth()->user();
+        $google2fa = app('pragmarx.google2fa');
+        $valid = $google2fa->verifyKey($user->google2fa_secret, $request->input('secret'));
+        if($valid){
+            $user->update([
+                'enable2fa' => true,
+            ]);
+            return redirect()->route('profile.edit')->with('success', "Enable google2fa  Success");
+        }
+        return \redirect()->route('profile.showForm2fa')->with('error',"Fail code");
+    }
+
+    public function notEnable2fa(){
+        \auth()->user()->update([
+            'enable2fa' => false,
+        ]);
+        return redirect()->route('profile.edit')->with('success', "Cancel Enable google2fa  Success");
     }
 }
